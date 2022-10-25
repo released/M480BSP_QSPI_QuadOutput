@@ -387,6 +387,26 @@ void PDMA_IRQHandler(void)
 
 void QSPIReadDataWithDMA(unsigned char *pBuffer , unsigned short size)
 {
+    #if 1
+    uint8_t tBuffer[30] = {0xFF};
+    set_flag(flag_qspi_tx_finish , DISABLE);
+    set_flag(flag_qspi_rx_finish , DISABLE);    
+    PDMA_SetTransferCnt(PDMA,QSPI_MASTER_TX_DMA_CH, PDMA_WIDTH_8, 30);
+    PDMA_SetTransferAddr(PDMA,QSPI_MASTER_TX_DMA_CH, (uint32_t)tBuffer, PDMA_SAR_INC, (uint32_t)&QSPI0->TX, PDMA_DAR_FIX);
+    PDMA_SetTransferMode(PDMA,QSPI_MASTER_TX_DMA_CH, PDMA_QSPI0_TX, FALSE, 0);    
+
+    PDMA_SetTransferCnt(PDMA,QSPI_MASTER_RX_DMA_CH, PDMA_WIDTH_8, size);
+    PDMA_SetTransferAddr(PDMA,QSPI_MASTER_RX_DMA_CH, (uint32_t)&QSPI0->RX, PDMA_SAR_FIX, (uint32_t)pBuffer, PDMA_DAR_INC);
+    PDMA_SetTransferMode(PDMA,QSPI_MASTER_RX_DMA_CH, PDMA_QSPI0_RX, FALSE, 0);   
+
+    QSPI_TRIGGER_TX_PDMA(QSPI0);
+    QSPI_TRIGGER_RX_PDMA(QSPI0);    
+
+    while(!is_flag_set(flag_qspi_tx_finish));
+    while(!is_flag_set(flag_qspi_rx_finish));    
+    while(QSPI_IS_BUSY(QSPI0)); 
+    QSPI_SET_SS_HIGH(QSPI0);
+    #else
     set_flag(flag_qspi_rx_finish , DISABLE);
     PDMA_SetTransferCnt(PDMA,QSPI_MASTER_RX_DMA_CH, PDMA_WIDTH_8, size);
     PDMA_SetTransferAddr(PDMA,QSPI_MASTER_RX_DMA_CH, (uint32_t)&QSPI0->RX, PDMA_SAR_FIX, (uint32_t)pBuffer, PDMA_DAR_INC);
@@ -396,6 +416,7 @@ void QSPIReadDataWithDMA(unsigned char *pBuffer , unsigned short size)
     while(!is_flag_set(flag_qspi_rx_finish));
     while(QSPI_IS_BUSY(QSPI0)); 
     QSPI_SET_SS_HIGH(QSPI0);    
+    #endif
 }
 
 int ReadSlaveRxRegs(unsigned char ChipNo , 
