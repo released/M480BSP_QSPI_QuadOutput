@@ -23,6 +23,13 @@ typedef enum{
 #define _debug_log_UART_					(1)
 
 // #define ENABLE_TICK_EVENT
+
+#define ENALBE_UART_IRQ
+
+// #define ENABLE_QSPI_MANUAL_SS
+#define ENALBE_PDMA_IRQ
+// #define ENALBE_PDMA_POLLING
+// #define ENALBE_QSPI_REGULAR_TRX
 /*_____ M A C R O S ________________________________________________________*/
 
 #define BitFlag_ON(flag)							(BitFlag|=flag)

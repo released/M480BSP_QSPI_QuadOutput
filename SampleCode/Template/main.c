@@ -29,10 +29,11 @@ volatile uint8_t _sys_uTimerEventCount = 0;             /* Speed up interrupt re
 #endif
 
 
-#define QSPI_TARGET_FREQ				(100000ul)
+#define QSPI_TARGET_FREQ				(800000ul)
+#define QSPI_TRANSMIT_LEN               (30)
 
-#define QSPI_MASTER_TX_DMA_CH 			(1)
-#define QSPI_MASTER_RX_DMA_CH 		    (2)
+#define QSPI_MASTER_TX_DMA_CH 			(14)
+#define QSPI_MASTER_RX_DMA_CH 		    (15)
 #define QSPI_MASTER_OPENED_CH   		((1 << QSPI_MASTER_TX_DMA_CH) | (1 << QSPI_MASTER_RX_DMA_CH))
 
 #define QSPI_4_WIRE_READ_RX_CMD         (0x5A)
@@ -327,6 +328,20 @@ void SysTick_enable(int ticks_per_second)
     #endif
 }
 
+void QSPI_SS_SET_LOW(void)
+{
+    #if defined (ENABLE_QSPI_MANUAL_SS)
+    QSPI_SET_SS_LOW(QSPI0); 
+    #endif
+}
+
+void QSPI_SS_SET_HIGH(void)
+{
+    #if defined (ENABLE_QSPI_MANUAL_SS)
+    QSPI_SET_SS_HIGH(QSPI0); 
+    #endif
+}
+
 // void QSPI_DMA_Complete_IRQHandler(void)
 void PDMA_IRQHandler(void)
 {
@@ -387,11 +402,19 @@ void PDMA_IRQHandler(void)
 
 void QSPIReadDataWithDMA(unsigned char *pBuffer , unsigned short size)
 {
-    #if 1
-    uint8_t tBuffer[30] = {0xFF};
+    #if defined (ENALBE_PDMA_POLLING)    
+	uint32_t u32RegValue = 0;
+	uint32_t u32Abort = 0;	
+    #elif defined (ENALBE_QSPI_REGULAR_TRX)
+    uint8_t i = 0;
+    #endif
+
+    uint8_t tBuffer[QSPI_TRANSMIT_LEN] = {0x00};
+
+    #if defined (ENALBE_PDMA_IRQ) || defined (ENALBE_PDMA_POLLING)    
     set_flag(flag_qspi_tx_finish , DISABLE);
     set_flag(flag_qspi_rx_finish , DISABLE);    
-    PDMA_SetTransferCnt(PDMA,QSPI_MASTER_TX_DMA_CH, PDMA_WIDTH_8, 30);
+    PDMA_SetTransferCnt(PDMA,QSPI_MASTER_TX_DMA_CH, PDMA_WIDTH_8, QSPI_TRANSMIT_LEN);
     PDMA_SetTransferAddr(PDMA,QSPI_MASTER_TX_DMA_CH, (uint32_t)tBuffer, PDMA_SAR_INC, (uint32_t)&QSPI0->TX, PDMA_DAR_FIX);
     PDMA_SetTransferMode(PDMA,QSPI_MASTER_TX_DMA_CH, PDMA_QSPI0_TX, FALSE, 0);    
 
@@ -401,22 +424,54 @@ void QSPIReadDataWithDMA(unsigned char *pBuffer , unsigned short size)
 
     QSPI_TRIGGER_TX_PDMA(QSPI0);
     QSPI_TRIGGER_RX_PDMA(QSPI0);    
+    #endif
 
+    #if defined (ENALBE_PDMA_IRQ)
     while(!is_flag_set(flag_qspi_tx_finish));
     while(!is_flag_set(flag_qspi_rx_finish));    
-    while(QSPI_IS_BUSY(QSPI0)); 
-    QSPI_SET_SS_HIGH(QSPI0);
-    #else
-    set_flag(flag_qspi_rx_finish , DISABLE);
-    PDMA_SetTransferCnt(PDMA,QSPI_MASTER_RX_DMA_CH, PDMA_WIDTH_8, size);
-    PDMA_SetTransferAddr(PDMA,QSPI_MASTER_RX_DMA_CH, (uint32_t)&QSPI0->RX, PDMA_SAR_FIX, (uint32_t)pBuffer, PDMA_DAR_INC);
-    PDMA_SetTransferMode(PDMA,QSPI_MASTER_RX_DMA_CH, PDMA_QSPI0_RX, FALSE, 0);    
-    QSPI_TRIGGER_RX_PDMA(QSPI0);
 
-    while(!is_flag_set(flag_qspi_rx_finish));
-    while(QSPI_IS_BUSY(QSPI0)); 
-    QSPI_SET_SS_HIGH(QSPI0);    
+    #elif defined (ENALBE_PDMA_POLLING)
+
+    while(1)
+    {
+        /* Get interrupt status */
+        u32RegValue = PDMA_GET_INT_STATUS(PDMA);
+        /* Check the DMA transfer done interrupt flag */
+        if(u32RegValue & PDMA_INTSTS_TDIF_Msk)
+        {
+            /* Check the PDMA transfer done interrupt flags */
+            if((PDMA_GET_TD_STS(PDMA) & (1 << QSPI_MASTER_RX_DMA_CH)) == (1 << QSPI_MASTER_RX_DMA_CH))
+            {
+                /* Clear the DMA transfer done flags */
+                PDMA_CLR_TD_FLAG(PDMA,1 << QSPI_MASTER_RX_DMA_CH);
+                /* Disable SPI PDMA TX function */
+                QSPI_DISABLE_RX_PDMA(QSPI0);
+                break;
+            }
+
+            /* Check the DMA transfer abort interrupt flag */
+            if(u32RegValue & PDMA_INTSTS_ABTIF_Msk)
+            {
+                /* Get the target abort flag */
+                u32Abort = PDMA_GET_ABORT_STS(PDMA);
+                /* Clear the target abort flag */
+                PDMA_CLR_ABORT_FLAG(PDMA,u32Abort);
+                break;
+            }
+        }
+    }
+    #elif defined (ENALBE_QSPI_REGULAR_TRX)
+
+    for (i = 0 ; i < QSPI_TRANSMIT_LEN ; i++)
+    {
+        QSPI_WRITE_TX(QSPI0, 0x00);
+        while(QSPI_IS_BUSY(QSPI0));
+        pBuffer[i] = QSPI_READ_RX(QSPI0);                      
+    }
     #endif
+
+    while(QSPI_IS_BUSY(QSPI0)); 
+    QSPI_SS_SET_HIGH();    
 }
 
 int ReadSlaveRxRegs(unsigned char ChipNo , 
@@ -426,7 +481,7 @@ int ReadSlaveRxRegs(unsigned char ChipNo ,
                     unsigned short size , 
                     int bDMAMode)
 {
-    QSPI_SET_SS_LOW(QSPI0);
+    QSPI_SS_SET_LOW();
     QSPI_SINGLE_OUTPUT_MODE_ENABLE(QSPI0);
     QSPI_WRITE_TX(QSPI0,QSPI_4_WIRE_READ_RX_CMD);
     while(QSPI_IS_BUSY(QSPI0));
@@ -451,15 +506,64 @@ int ReadSlaveRxRegs(unsigned char ChipNo ,
 
 void QSPIWriteDataWithDMA(unsigned char *pBuffer , unsigned short size)
 {
+    #if defined (ENALBE_PDMA_POLLING)    
+	uint32_t u32RegValue = 0;
+	uint32_t u32Abort = 0;
+    #elif defined (ENALBE_QSPI_REGULAR_TRX)
+    uint8_t i = 0;
+    #endif
+
+    #if defined (ENALBE_PDMA_IRQ) || defined (ENALBE_PDMA_POLLING)
     set_flag(flag_qspi_tx_finish , DISABLE);
     PDMA_SetTransferCnt(PDMA,QSPI_MASTER_TX_DMA_CH, PDMA_WIDTH_8, size);
     PDMA_SetTransferAddr(PDMA,QSPI_MASTER_TX_DMA_CH, (uint32_t)pBuffer, PDMA_SAR_INC, (uint32_t)&QSPI0->TX, PDMA_DAR_FIX);
     PDMA_SetTransferMode(PDMA,QSPI_MASTER_TX_DMA_CH, PDMA_QSPI0_TX, FALSE, 0);    
     QSPI_TRIGGER_TX_PDMA(QSPI0);
+    #endif
 
+    #if defined (ENALBE_PDMA_IRQ)
     while(!is_flag_set(flag_qspi_tx_finish));
-    while(QSPI_IS_BUSY(QSPI0)); 
-    QSPI_SET_SS_HIGH(QSPI0);
+    #elif defined (ENALBE_PDMA_POLLING)   
+    while(1)
+    {
+        /* Get interrupt status */
+        u32RegValue = PDMA_GET_INT_STATUS(PDMA);
+        /* Check the DMA transfer done interrupt flag */
+        if(u32RegValue & PDMA_INTSTS_TDIF_Msk)
+        {
+            /* Check the PDMA transfer done interrupt flags */
+            if((PDMA_GET_TD_STS(PDMA) & (1 << QSPI_MASTER_TX_DMA_CH)) == (1 << QSPI_MASTER_TX_DMA_CH))
+            {
+                /* Clear the DMA transfer done flags */
+                PDMA_CLR_TD_FLAG(PDMA,1 << QSPI_MASTER_TX_DMA_CH);
+                /* Disable SPI PDMA TX function */
+                QSPI_DISABLE_TX_PDMA(QSPI0);
+                break;
+            }
+
+            /* Check the DMA transfer abort interrupt flag */
+            if(u32RegValue & PDMA_INTSTS_ABTIF_Msk)
+            {
+                /* Get the target abort flag */
+                u32Abort = PDMA_GET_ABORT_STS(PDMA);
+                /* Clear the target abort flag */
+                PDMA_CLR_ABORT_FLAG(PDMA,u32Abort);
+                break;
+            }
+        }
+    }
+    #elif defined (ENALBE_QSPI_REGULAR_TRX)
+
+    for (i = 0 ; i < QSPI_TRANSMIT_LEN ; i++)
+    {
+        QSPI_WRITE_TX(QSPI0,pBuffer[i]);
+        while(QSPI_IS_BUSY(QSPI0));      
+    }
+    #endif
+
+    while(QSPI_IS_BUSY(QSPI0));
+    QSPI_SS_SET_HIGH();   
+
 }
 
 int WriteSlaveRxRegs(unsigned char ChipNo , 
@@ -469,7 +573,7 @@ int WriteSlaveRxRegs(unsigned char ChipNo ,
                     unsigned short size , 
                     int bDMAMode)
 {
-    QSPI_SET_SS_LOW(QSPI0);
+    QSPI_SS_SET_LOW();
     QSPI_SINGLE_OUTPUT_MODE_ENABLE(QSPI0);
     QSPI_WRITE_TX(QSPI0,QSPI_4_WIRE_WRITE_RX_CMD);
     while(QSPI_IS_BUSY(QSPI0));
@@ -497,20 +601,25 @@ void InitQSPIDMA(void)
 
     QSPI_DISABLE_TX_RX_PDMA(QSPI0);
 
+    #if defined (ENALBE_PDMA_IRQ)
     PDMA_EnableInt(PDMA, QSPI_MASTER_TX_DMA_CH, PDMA_INT_TRANS_DONE);
     PDMA_EnableInt(PDMA, QSPI_MASTER_RX_DMA_CH, PDMA_INT_TRANS_DONE);
 
+    NVIC_SetPriority(PDMA_IRQn,0);
     NVIC_ClearPendingIRQ(PDMA_IRQn);
     NVIC_EnableIRQ(PDMA_IRQn);
+    #endif
 
 }
 
 void InitQSPI(void)
 {
+    uint32_t clk = 0;
+    
     SYS_UnlockReg();
     CLK_EnableModuleClock(QSPI0_MODULE);
     CLK_EnableModuleClock(PDMA_MODULE);    
-    CLK_SetModuleClock(QSPI0_MODULE, CLK_CLKSEL2_QSPI0SEL_PLL, MODULE_NoMsk);
+    CLK_SetModuleClock(QSPI0_MODULE, CLK_CLKSEL2_QSPI0SEL_PCLK0, MODULE_NoMsk);
     SYS_LockReg();
 
     SYS->GPA_MFPL &= ~(SYS_GPA_MFPL_PA2MFP_Msk | SYS_GPA_MFPL_PA5MFP_Msk);
@@ -524,32 +633,46 @@ void InitQSPI(void)
 
     /* Enable QSPI0 clock pin (PA2) schmitt trigger */
     PA->SMTEN |= GPIO_SMTEN_SMTEN2_Msk;
+    PA->SMTEN |= GPIO_SMTEN_SMTEN5_Msk;  
+    PH->SMTEN |= GPIO_SMTEN_SMTEN9_Msk;  
+    PH->SMTEN |= GPIO_SMTEN_SMTEN11_Msk;  
+    PC->SMTEN |= GPIO_SMTEN_SMTEN0_Msk;   
+    PE->SMTEN |= GPIO_SMTEN_SMTEN1_Msk;           
 
-    GPIO_SetSlewCtl(PA, BIT2 | BIT5 , GPIO_SLEWCTL_HIGH);
-    GPIO_SetSlewCtl(PH, BIT9 | BIT11 , GPIO_SLEWCTL_HIGH);
-    GPIO_SetSlewCtl(PC, BIT0 , GPIO_SLEWCTL_HIGH);
-    GPIO_SetSlewCtl(PE, BIT1 , GPIO_SLEWCTL_HIGH);
+    GPIO_SetSlewCtl(PA, BIT2 | BIT5 , GPIO_SLEWCTL_FAST);
+    GPIO_SetSlewCtl(PH, BIT9 | BIT11 , GPIO_SLEWCTL_FAST);
+    GPIO_SetSlewCtl(PC, BIT0 , GPIO_SLEWCTL_FAST);
+    GPIO_SetSlewCtl(PE, BIT1 , GPIO_SLEWCTL_FAST);
 
-    QSPI_Open(QSPI0, QSPI_MASTER, QSPI_MODE_0, 8, QSPI_TARGET_FREQ);
+    clk = QSPI_Open(QSPI0, QSPI_MASTER, QSPI_MODE_0, 8, QSPI_TARGET_FREQ);
+    // printf("clk = %8d\r\n", clk);
+
+    #if defined (ENABLE_QSPI_MANUAL_SS)
     QSPI_DisableAutoSS(QSPI0);
-    QSPI_SET_SS_HIGH(QSPI0);
+    QSPI_SS_SET_HIGH();
+    #else
+    QSPI_EnableAutoSS(QSPI0, SPI_SS, SPI_SS_ACTIVE_LOW);
+    #endif
+
+    QSPI_SET_SUSPEND_CYCLE(QSPI0,0);
+    // QSPI_SetFIFO(QSPI0, 4, 4);
 
     InitQSPIDMA();
 }
 
 void TestQSPIFlow(void)
 {
-    unsigned char WriteBuf[30] = {0};
-    unsigned char ReadBuf[30] = {0};   
+    unsigned char WriteBuf[QSPI_TRANSMIT_LEN] = {0};
+    unsigned char ReadBuf[QSPI_TRANSMIT_LEN] = {0};   
     unsigned char i = 0;
 
-     for( i = 0 ; i < 30 ; i++)
+     for( i = 0 ; i < QSPI_TRANSMIT_LEN ; i++)
      {
         WriteBuf[i] = i;
      }
 
-     WriteSlaveRxRegs(0 , 0 , 0 , &WriteBuf[0] , 30 , 1 );
-     ReadSlaveRxRegs(0 , 0 , 0 , &ReadBuf[0] , 30 , 1 );
+     WriteSlaveRxRegs(0 , 0 , 0 , &WriteBuf[0] , QSPI_TRANSMIT_LEN , 1 );
+     ReadSlaveRxRegs(0 , 0 , 0 , &ReadBuf[0] , QSPI_TRANSMIT_LEN , 1 );
 }
 
 
@@ -655,10 +778,12 @@ void UART0_Init(void)
 	UART0->FIFO &= ~UART_FIFO_RFITL_4BYTES;
 	UART0->FIFO |= UART_FIFO_RFITL_8BYTES;
 
+    #if defined (ENALBE_UART_IRQ)
 	/* Enable UART Interrupt - */
 	UART_ENABLE_INT(UART0, UART_INTEN_RDAIEN_Msk | UART_INTEN_TOCNTEN_Msk | UART_INTEN_RXTOIEN_Msk);
 	
 	NVIC_EnableIRQ(UART0_IRQn);
+    #endif
 
 	#if (_debug_log_UART_ == 1)	//debug
 	printf("\r\nCLK_GetCPUFreq : %8d\r\n",CLK_GetCPUFreq());
@@ -693,22 +818,22 @@ void SYS_Init(void)
     /* Set XT1_OUT(PF.2) and XT1_IN(PF.3) to input mode */
     PF->MODE &= ~(GPIO_MODE_MODE2_Msk | GPIO_MODE_MODE3_Msk);
     
-    CLK_EnableXtalRC(CLK_PWRCTL_HIRCEN_Msk);
-    CLK_WaitClockReady(CLK_STATUS_HIRCSTB_Msk);
+    // CLK_EnableXtalRC(CLK_PWRCTL_HIRCEN_Msk);
+    // CLK_WaitClockReady(CLK_STATUS_HIRCSTB_Msk);
 
-//    CLK_EnableXtalRC(CLK_PWRCTL_HXTEN_Msk);
-//    CLK_WaitClockReady(CLK_STATUS_HXTSTB_Msk);
+    CLK_EnableXtalRC(CLK_PWRCTL_HXTEN_Msk);
+    CLK_WaitClockReady(CLK_STATUS_HXTSTB_Msk);
 
-//    CLK_EnableXtalRC(CLK_PWRCTL_LIRCEN_Msk);
-//    CLK_WaitClockReady(CLK_STATUS_LIRCSTB_Msk);
+    // CLK_EnableXtalRC(CLK_PWRCTL_LIRCEN_Msk);
+    // CLK_WaitClockReady(CLK_STATUS_LIRCSTB_Msk);
 
-//    CLK_EnableXtalRC(CLK_PWRCTL_LXTEN_Msk);
-//    CLK_WaitClockReady(CLK_STATUS_LXTSTB_Msk);
+    // CLK_EnableXtalRC(CLK_PWRCTL_LXTEN_Msk);
+    // CLK_WaitClockReady(CLK_STATUS_LXTSTB_Msk);
 
     /* Set core clock as PLL_CLOCK from PLL */
     CLK_SetCoreClock(FREQ_192MHZ);
     /* Set PCLK0/PCLK1 to HCLK/2 */
-    CLK->PCLKDIV = (CLK_PCLKDIV_APB0DIV_DIV2 | CLK_PCLKDIV_APB1DIV_DIV2);
+    CLK->PCLKDIV = (CLK_PCLKDIV_APB0DIV_DIV1 | CLK_PCLKDIV_APB1DIV_DIV1);
 
     /* Enable UART clock */
     CLK_EnableModuleClock(UART0_MODULE);
@@ -743,10 +868,10 @@ int main()
     SYS_Init();
 
 	Custom_Init();
-	UART0_Init();
-	TIMER1_Init();
+	// UART0_Init();
+	// TIMER1_Init();
 
-    SysTick_enable(1000);
+    // SysTick_enable(1000);
     #if defined (ENABLE_TICK_EVENT)
     TickSetTickEvent(1000, TickCallback_processA);  // 1000 ms
     TickSetTickEvent(5000, TickCallback_processB);  // 5000 ms
