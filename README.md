@@ -20,14 +20,14 @@ when QSPI speed is 800K , use auto SS function , with define : ENALBE_PDMA_IRQ
 ![image](https://github.com/released/M480BSP_QSPI_QuadOutput/blob/main/800K_ENALBE_PDMA_IRQ_AutoSS.jpg)	
 
 
-when QSPI speed is 48MHz , use auto SS function , with define : ENALBE_QSPI_REGULAR_TRX
-![image](https://github.com/released/M480BSP_QSPI_QuadOutput/blob/main/48MHz_ENALBE_QSPI_REGULAR_TRX_clock.jpg)	
+when QSPI speed is 24MHz , use auto SS function , with define : ENALBE_QSPI_REGULAR_TRX
+![image](https://github.com/released/M480BSP_QSPI_QuadOutput/blob/main/24MHz_ENALBE_QSPI_REGULAR_TRX_clock.jpg)	
 
 between 2 SS low , 
-![image](https://github.com/released/M480BSP_QSPI_QuadOutput/blob/main/48MHz_ENALBE_QSPI_REGULAR_TRX_SS.jpg)	
+![image](https://github.com/released/M480BSP_QSPI_QuadOutput/blob/main/24MHz_ENALBE_QSPI_REGULAR_TRX_SS.jpg)	
 
 
-when QSPI speed is 48MHz , use auto SS function , with define : ENALBE_QSPI_REGULAR_TRX
+when QSPI speed is 96MHz , use auto SS function , with define : ENALBE_QSPI_REGULAR_TRX
 ![image](https://github.com/released/M480BSP_QSPI_QuadOutput/blob/main/96MHz_ENALBE_QSPI_REGULAR_TRX_clock.jpg)	
 
 between 2 SS low , 
