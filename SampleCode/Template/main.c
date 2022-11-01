@@ -29,7 +29,7 @@ volatile uint8_t _sys_uTimerEventCount = 0;             /* Speed up interrupt re
 #endif
 
 
-#define QSPI_TARGET_FREQ				(800000ul)
+#define QSPI_TARGET_FREQ				(100000ul)
 #define QSPI_TRANSMIT_LEN               (30)
 
 #define QSPI_MASTER_TX_DMA_CH 			(14)
@@ -407,6 +407,7 @@ void QSPIReadDataWithDMA(unsigned char *pBuffer , unsigned short size)
 	uint32_t u32Abort = 0;	
     #elif defined (ENALBE_QSPI_REGULAR_TRX)
     uint8_t i = 0;
+    uint8_t j = 0;    
     #endif
 
     uint8_t tBuffer[QSPI_TRANSMIT_LEN] = {0x00};
@@ -461,13 +462,30 @@ void QSPIReadDataWithDMA(unsigned char *pBuffer , unsigned short size)
         }
     }
     #elif defined (ENALBE_QSPI_REGULAR_TRX)
-
+    #if 1   // improve
+    j=0;
+    for (i = 0 ; i < QSPI_TRANSMIT_LEN ; )
+    {
+        if(!QSPI_GET_TX_FIFO_FULL_FLAG(QSPI0))
+        {
+            QSPI_WRITE_TX(QSPI0, 0x00);
+            i++;
+        }
+        if(!QSPI_GET_RX_FIFO_EMPTY_FLAG(QSPI0))
+        {
+            pBuffer[j++] = QSPI_READ_RX(QSPI0);   
+        }                   
+    }
+    while(!QSPI_GET_RX_FIFO_EMPTY_FLAG(QSPI0))
+        pBuffer[j++] = QSPI_READ_RX(QSPI0);  
+    #else
     for (i = 0 ; i < QSPI_TRANSMIT_LEN ; i++)
     {
         QSPI_WRITE_TX(QSPI0, 0x00);
         while(QSPI_IS_BUSY(QSPI0));
         pBuffer[i] = QSPI_READ_RX(QSPI0);                      
     }
+    #endif
     #endif
 
     while(QSPI_IS_BUSY(QSPI0)); 

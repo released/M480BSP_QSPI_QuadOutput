@@ -33,6 +33,13 @@ when QSPI speed is 96MHz , use auto SS function , with define : ENALBE_QSPI_REGU
 timing between 2 SS low , 
 ![image](https://github.com/released/M480BSP_QSPI_QuadOutput/blob/main/96MHz_ENALBE_QSPI_REGULAR_TRX_SS.jpg)	
 
+timing between 2 SS low , process improve
+![image](https://github.com/released/M480BSP_QSPI_QuadOutput/blob/main/96MHz_ENALBE_QSPI_REGULAR_TRX_SS_improve.jpg)	
+
+when QSPI speed is 96MHz , use auto SS function , with define : ENALBE_PDMA_IRQ
+timing between 2 SS low
+![image](https://github.com/released/M480BSP_QSPI_QuadOutput/blob/main/96MHz_ENALBE_PDMA_IRQ_AutoSS.jpg)	
+
 
 
 update @ 2022/10/24
